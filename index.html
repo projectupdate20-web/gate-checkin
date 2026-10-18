@@ -9,13 +9,17 @@
 <title>Gate Check-in</title>
 <!--
   Gate scanner for the Event Registration & QR Check-in system.
-  Host this file on any HTTPS site (GitHub Pages works well); phone cameras
-  only work on HTTPS pages. Paste your Apps Script web app URL below.
+  Host this file together with jsQR.js on any HTTPS site (GitHub Pages works
+  well); phone cameras only work on HTTPS pages.
+
+  Deliberately contains no server address: each officer pastes the Apps Script
+  web app URL once on the sign-in screen and the phone remembers it. That way
+  the public page reveals nothing about your check-in API.
 -->
 <script>
-  const API_URL = 'https://script.google.com/macros/s/AKfycbxyKap6CEN4mjI2npZGZma_xgEFqluP8-B8pYL16TEK0wNZgVTr9pQG_FqSpIZLACqLSQ/exec';  // https://script.google.com/macros/s/.../exec
+  const API_URL = '';  // leave empty; set only if this page is hosted privately
 </script>
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="jsQR.js"></script>
 <style>
   :root {
     --bg: #f4f5f7; --surface: #ffffff; --ink: #111827; --muted: #6b7280; --line: #e5e7eb;
@@ -119,8 +123,10 @@
   <p class="muted">Sign in once per device. You'll stay signed in on this phone.</p>
   <form id="loginForm" class="card" autocomplete="off">
     <div id="apiField" class="hidden">
-      <label for="api">Web app URL</label>
-      <input id="api" type="url" placeholder="https://script.google.com/macros/s/.../exec">
+      <label for="api">Check-in link</label>
+      <input id="api" type="url" inputmode="url" autocapitalize="off" spellcheck="false"
+        placeholder="https://script.google.com/macros/s/…/exec">
+      <small class="muted">Get this from the event lead. Saved on this phone, so you only enter it once.</small>
     </div>
     <label for="gate">Gate name</label>
     <input id="gate" placeholder="e.g. Gate A" maxlength="40" required>
@@ -199,7 +205,7 @@
     set(k, v) { try { localStorage.setItem('checkin.' + k, v); } catch (e) {} },
     del(k) { try { localStorage.removeItem('checkin.' + k); } catch (e) {} },
   };
-  const configured = API_URL && !API_URL.includes('PASTE_');
+  const configured = !!API_URL && !API_URL.includes('PASTE_');
   const state = {
     api: configured ? API_URL : (store.get('api') || ''),
     gate: store.get('gate') || '',
@@ -247,7 +253,10 @@
     if (!configured) state.api = $('api').value.trim();
     state.gate = $('gate').value.trim();
     state.pin = $('pin').value;
-    if (!state.api) { $('loginErr').textContent = 'Enter the web app URL.'; return; }
+    if (!/^https:\/\/script\.google\.com\/(a\/macros\/[^/]+|macros)\/s\/[\w-]+\/exec\/?$/.test(state.api)) {
+      $('loginErr').textContent = 'That check-in link doesn\'t look right. It should start with https://script.google.com/macros/s/ and end with /exec.';
+      return;
+    }
     $('loginBtn').disabled = true; $('loginErr').textContent = 'Connecting…';
     const r = await call('hello');
     $('loginBtn').disabled = false;
