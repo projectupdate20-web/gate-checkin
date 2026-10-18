@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Gate Check-in</title>
+<!--
+  Gate scanner for the Event Registration & QR Check-in system.
+  Host this file on any HTTPS site (GitHub Pages works well); phone cameras
+  only work on HTTPS pages. Paste your Apps Script web app URL below.
+-->
+<script>
+  const API_URL = 'https://script.google.com/macros/s/AKfycbxyKap6CEN4mjI2npZGZma_xgEFqluP8-B8pYL16TEK0wNZgVTr9pQG_FqSpIZLACqLSQ/exec';  // https://script.google.com/macros/s/.../exec
+</script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<style>
+  :root {
+    --bg: #f4f5f7; --surface: #ffffff; --ink: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #1d4ed8; --ok: #15803d; --ok-bg: #dcfce7; --warn: #b45309; --warn-bg: #fef3c7;
+    --bad: #b91c1c; --bad-bg: #fee2e2; --info: #334155; --info-bg: #e2e8f0;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1120; --surface: #111a2e; --ink: #f1f5f9; --muted: #94a3b8; --line: #1f2a44;
+      --accent: #60a5fa; --ok: #4ade80; --ok-bg: #052e16; --warn: #fbbf24; --warn-bg: #3a2a05;
+      --bad: #f87171; --bad-bg: #3b0a0a; --info: #cbd5e1; --info-bg: #1e293b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { min-height: 100dvh; padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+  .hidden { display: none !important; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  label { display: block; font-weight: 600; margin: 14px 0 6px; font-size: 14px; }
+  input { width: 100%; font-size: 18px; padding: 12px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 10px; }
+  .btn { width: 100%; margin-top: 18px; padding: 14px; font-size: 18px; font-weight: 700;
+    background: var(--accent); color: #fff; }
+  .btn:disabled { opacity: .5; }
+  .err { color: var(--bad); margin-top: 10px; min-height: 1.4em; font-weight: 600; }
+
+  /* Header */
+  .top { display: flex; align-items: center; gap: 10px; }
+  .top .title { flex: 1; min-width: 0; }
+  .top .title b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); flex: none; }
+  .dot.off { background: var(--bad); }
+  .link { background: none; color: var(--accent); font-size: 14px; padding: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; }
+  .stat b { font-size: 22px; display: block; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 12px; color: var(--muted); }
+
+  /* Tabs */
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 12px; padding: 4px; gap: 4px; }
+  .tabs button { padding: 10px; font-weight: 700; background: none; color: var(--muted); }
+  .tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+
+  /* Scanner */
+  .viewer { position: relative; margin-top: 12px; border-radius: var(--radius); overflow: hidden;
+    background: #000; aspect-ratio: 1 / 1; }
+  video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .frame { position: absolute; inset: 15%; border: 3px solid rgba(255,255,255,.85);
+    border-radius: 18px; box-shadow: 0 0 0 999px rgba(0,0,0,.25); pointer-events: none; }
+  .camhint { position: absolute; inset: 0; display: grid; place-items: center; color: #fff;
+    text-align: center; padding: 24px; font-weight: 600; }
+  .camhint button { margin-top: 12px; padding: 12px 18px; background: #fff; color: #000; font-weight: 700; }
+
+  .result { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; padding: 20px; gap: 6px; }
+  .result .big { font-size: 30px; font-weight: 800; letter-spacing: .5px; }
+  .result .name { font-size: 24px; font-weight: 700; }
+  .result .sub { font-size: 16px; }
+  .result .tap { position: absolute; bottom: 12px; font-size: 13px; opacity: .8; }
+  .r-ok { background: var(--ok-bg); color: var(--ok); }
+  .r-warn { background: var(--warn-bg); color: var(--warn); }
+  .r-bad { background: var(--bad-bg); color: var(--bad); }
+  .r-info { background: var(--info-bg); color: var(--info); }
+
+  .recent { margin-top: 14px; }
+  .recent h2, .search h2 { font-size: 14px; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+  .row .who { flex: 1; min-width: 0; }
+  .row .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .who small { color: var(--muted); }
+  .chip { font-size: 12px; font-weight: 700; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.ok { background: var(--ok-bg); color: var(--ok); }
+  .chip.warn { background: var(--warn-bg); color: var(--warn); }
+  .chip.bad { background: var(--bad-bg); color: var(--bad); }
+  .chip.info { background: var(--info-bg); color: var(--info); }
+  .admit { padding: 10px 14px; background: var(--ok); color: #fff; font-weight: 700; }
+  .empty { text-align: center; color: var(--muted); padding: 20px; }
+
+  dialog { border: 0; border-radius: var(--radius); padding: 20px; width: min(92vw, 400px);
+    background: var(--surface); color: var(--ink); }
+  dialog::backdrop { background: rgba(0,0,0,.5); }
+  .dlg-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .dlg-actions button { flex: 1; padding: 12px; font-weight: 700; }
+  .cancel { background: var(--info-bg); color: var(--info); }
+</style>
+</head>
+<body>
+
+<!-- Sign-in -->
+<main id="login" class="wrap">
+  <h1>Gate Check-in</h1>
+  <p class="muted">Sign in once per device. You'll stay signed in on this phone.</p>
+  <form id="loginForm" class="card" autocomplete="off">
+    <div id="apiField" class="hidden">
+      <label for="api">Web app URL</label>
+      <input id="api" type="url" placeholder="https://script.google.com/macros/s/.../exec">
+    </div>
+    <label for="gate">Gate name</label>
+    <input id="gate" placeholder="e.g. Gate A" maxlength="40" required>
+    <label for="pin">Gate PIN</label>
+    <input id="pin" type="password" inputmode="text" required>
+    <button class="btn" id="loginBtn" type="submit">Start checking in</button>
+    <div class="err" id="loginErr" role="alert"></div>
+  </form>
+</main>
+
+<!-- Main -->
+<main id="app" class="wrap hidden">
+  <div class="top">
+    <span class="dot" id="netDot" title="Connection"></span>
+    <div class="title"><b id="evName">Event</b><small class="muted" id="gateLabel"></small></div>
+    <button class="link" id="signOut">Sign out</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="stAdmitted">–</b><span>Admitted</span></div>
+    <div class="stat"><b id="stConfirmed">–</b><span>Registered</span></div>
+    <div class="stat"><b id="stLeft">–</b><span>Still to arrive</span></div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tabScan" aria-selected="true">Scan QR</button>
+    <button role="tab" id="tabSearch" aria-selected="false">Find by name</button>
+  </div>
+
+  <section id="scanView">
+    <div class="viewer" id="viewer">
+      <video id="video" playsinline muted></video>
+      <div class="frame" id="frame"></div>
+      <div class="camhint" id="camHint">
+        <div><div id="camMsg">Starting camera…</div><button id="camBtn" class="hidden">Allow camera</button></div>
+      </div>
+      <div class="result hidden" id="result" role="status" aria-live="assertive">
+        <div class="big" id="rBig"></div>
+        <div class="name" id="rName"></div>
+        <div class="sub" id="rSub"></div>
+        <div class="tap">Tap to scan next</div>
+      </div>
+    </div>
+    <div class="recent">
+      <h2>Recent at this gate</h2>
+      <div id="recentList"><div class="empty">No scans yet</div></div>
+    </div>
+  </section>
+
+  <section id="searchView" class="search hidden">
+    <label for="q">Name, email or registration ID</label>
+    <input id="q" type="search" placeholder="Start typing…" autocomplete="off">
+    <p class="muted" style="font-size:14px">Ask to see their confirmation email and check the name and ID match before admitting.</p>
+    <div id="searchList"></div>
+  </section>
+</main>
+
+<dialog id="confirmDlg">
+  <div style="font-size:18px;font-weight:700" id="dlgTitle"></div>
+  <div class="muted" id="dlgBody" style="margin-top:6px"></div>
+  <div class="dlg-actions">
+    <button class="cancel" id="dlgNo">Cancel</button>
+    <button class="admit" id="dlgYes">Admit</button>
+  </div>
+</dialog>
+
+<canvas id="canvas" class="hidden"></canvas>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- State & storage ----------
+  const store = {
+    get(k) { try { return localStorage.getItem('checkin.' + k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem('checkin.' + k, v); } catch (e) {} },
+    del(k) { try { localStorage.removeItem('checkin.' + k); } catch (e) {} },
+  };
+  const configured = API_URL && !API_URL.includes('PASTE_');
+  const state = {
+    api: configured ? API_URL : (store.get('api') || ''),
+    gate: store.get('gate') || '',
+    pin: store.get('pin') || '',
+    busy: false,
+    lastPayload: '', lastPayloadAt: 0,
+    recent: [],
+    stream: null,
+  };
+  const $ = id => document.getElementById(id);
+
+  // ---------- API ----------
+  async function call(action, data) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      // No custom headers: keeps this a "simple" request so Apps Script accepts it cross-origin.
+      const res = await fetch(state.api, {
+        method: 'POST', redirect: 'follow', signal: ctrl.signal,
+        body: JSON.stringify(Object.assign({ action, pin: state.pin, gate: state.gate }, data || {})),
+      });
+      const json = await res.json();
+      setOnline(true);
+      return json;
+    } catch (err) {
+      setOnline(false);
+      return { ok: false, error: 'NETWORK', message: navigator.onLine ? 'Could not reach the server.' : 'No internet connection.' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  function setOnline(on) { $('netDot').classList.toggle('off', !on); }
+  window.addEventListener('offline', () => setOnline(false));
+  window.addEventListener('online', () => setOnline(true));
+
+  // ---------- Sign-in ----------
+  if (!configured) {
+    $('apiField').classList.remove('hidden');
+    $('api').value = state.api;
+  }
+  $('gate').value = state.gate;
+
+  $('loginForm').addEventListener('submit', async ev => {
+    ev.preventDefault();
+    if (!configured) state.api = $('api').value.trim();
+    state.gate = $('gate').value.trim();
+    state.pin = $('pin').value;
+    if (!state.api) { $('loginErr').textContent = 'Enter the web app URL.'; return; }
+    $('loginBtn').disabled = true; $('loginErr').textContent = 'Connecting…';
+    const r = await call('hello');
+    $('loginBtn').disabled = false;
+    if (!r.ok) { $('loginErr').textContent = r.message || r.error; return; }
+    if (!configured) store.set('api', state.api);
+    store.set('gate', state.gate); store.set('pin', state.pin);
+    $('loginErr').textContent = '';
+    enterApp(r);
+  });
+
+  $('signOut').addEventListener('click', () => {
+    store.del('pin'); state.pin = '';
+    stopCamera();
+    $('app').classList.add('hidden'); $('login').classList.remove('hidden');
+    $('pin').value = '';
+  });
+
+  function enterApp(r) {
+    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+    $('evName').textContent = (r.event && r.event.name) || 'Event';
+    $('gateLabel').textContent = state.gate + (r.event && r.event.code ? ' · ' + r.event.code : '');
+    showStats(r.stats);
+    keepAwake();
+    startCamera();
+  }
+
+  function showStats(s) {
+    if (!s) return;
+    $('stAdmitted').textContent = s.admitted;
+    $('stConfirmed').textContent = s.confirmed;
+    $('stLeft').textContent = Math.max(0, s.confirmed - s.admitted);
+  }
+  setInterval(async () => {
+    if ($('app').classList.contains('hidden') || state.busy) return;
+    const r = await call('stats');
+    if (r.ok) showStats(r.stats);
+  }, 30000);
+
+  // ---------- Tabs ----------
+  function selectTab(scan) {
+    $('tabScan').setAttribute('aria-selected', scan);
+    $('tabSearch').setAttribute('aria-selected', !scan);
+    $('scanView').classList.toggle('hidden', !scan);
+    $('searchView').classList.toggle('hidden', scan);
+    if (scan) startCamera(); else { stopCamera(); $('q').focus(); }
+  }
+  $('tabScan').addEventListener('click', () => selectTab(true));
+  $('tabSearch').addEventListener('click', () => selectTab(false));
+
+  // ---------- Camera & decoding ----------
+  const video = $('video'), canvas = $('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  let detector = null;
+  if ('BarcodeDetector' in window) {
+    try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { detector = null; }
+  }
+
+  async function startCamera() {
+    if (state.stream) return;
+    $('camHint').classList.remove('hidden'); $('camBtn').classList.add('hidden');
+    $('camMsg').textContent = 'Starting camera…';
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false,
+      });
+      video.srcObject = state.stream;
+      await video.play();
+      $('camHint').classList.add('hidden');
+      requestAnimationFrame(tick);
+    } catch (err) {
+      state.stream = null;
+      $('camMsg').textContent = location.protocol !== 'https:' && location.hostname !== 'localhost'
+        ? 'The camera needs an HTTPS page. Host this file on GitHub Pages or similar.'
+        : 'Camera blocked. Allow camera access for this site, then tap below.';
+      $('camBtn').classList.remove('hidden');
+    }
+  }
+  $('camBtn').addEventListener('click', startCamera);
+
+  function stopCamera() {
+    if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+    state.stream = null;
+  }
+
+  let lastDecode = 0;
+  async function tick(ts) {
+    if (!state.stream) return;
+    requestAnimationFrame(tick);
+    if (state.busy || ts - lastDecode < 120 || video.readyState < 2) return;
+    lastDecode = ts;
+    const text = await decodeFrame();
+    if (text) onScan(text);
+  }
+
+  async function decodeFrame() {
+    try {
+      if (detector) {
+        const codes = await detector.detect(video);
+        return codes.length ? codes[0].rawValue : null;
+      }
+      if (typeof jsQR !== 'function') return null;
+      const w = video.videoWidth, h = video.videoHeight;
+      const size = Math.min(w, h, 720);
+      const sx = (w - Math.min(w, h)) / 2, sy = (h - Math.min(w, h)) / 2;
+      canvas.width = size; canvas.height = size;
+      ctx.drawImage(video, sx, sy, Math.min(w, h), Math.min(w, h), 0, 0, size, size);
+      const img = ctx.getImageData(0, 0, size, size);
+      const code = jsQR(img.data, size, size, { inversionAttempts: 'dontInvert' });
+      return code ? code.data : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function onScan(payload) {
+    const now = Date.now();
+    if (payload === state.lastPayload && now - state.lastPayloadAt < 6000) return;  // same code still in view
+    state.lastPayload = payload; state.lastPayloadAt = now;
+    state.busy = true;
+    showResult('info', 'Checking…', '', '');
+    beep('tick');
+    const r = await call('scan', { payload });
+    handleResult(r);
+  }
+
+  // ---------- Results ----------
+  const RESULT_VIEW = {
+    ADMITTED:  ['ok',   '✓ ADMITTED',            r => 'ID ' + r.regId],
+    ALREADY:   ['warn', '⚠ ALREADY CHECKED IN',   r => 'at ' + r.admittedAt + ' · ' + r.gate],
+    WAITLIST:  ['bad',  '✕ WAITLIST ONLY',        r => 'Not confirmed · ID ' + r.regId],
+    CANCELLED: ['bad',  '✕ CANCELLED',            r => 'ID ' + r.regId],
+    NOT_FOUND: ['bad',  '✕ NOT FOUND',            r => 'Not registered for this event'],
+    INVALID:   ['bad',  '✕ INVALID CODE',         r => 'Not a ticket for this event'],
+  };
+
+  function handleResult(r) {
+    if (!r.ok) {
+      if (r.error === 'BAD_PIN' || r.error === 'LOCKED') {
+        alert(r.message || 'Please sign in again.');
+        $('signOut').click();
+        return;
+      }
+      showResult('bad', r.error === 'NETWORK' ? 'NO CONNECTION' : 'ERROR', '', (r.message || r.error) + ' · Tap to retry');
+      beep('bad');
+      state.lastPayload = '';  // allow an immediate rescan
+      armDismiss(8000);
+      return;
+    }
+    const v = RESULT_VIEW[r.result] || ['bad', r.result, () => ''];
+    showResult(v[0], v[1], r.name || '', v[2](r));
+    beep(v[0]);
+    if (navigator.vibrate) navigator.vibrate(v[0] === 'ok' ? 120 : [80, 60, 80, 60, 80]);
+    addRecent(r, v);
+    showStats(r.stats);
+    armDismiss(v[0] === 'ok' ? 2500 : 6000);
+  }
+
+  function showResult(kind, big, name, sub) {
+    const el = $('result');
+    el.className = 'result r-' + kind;
+    $('rBig').textContent = big; $('rName').textContent = name; $('rSub').textContent = sub;
+  }
+
+  let dismissTimer = null;
+  function armDismiss(ms) {
+    clearTimeout(dismissTimer);
+    dismissTimer = setTimeout(dismiss, ms);
+  }
+  function dismiss() {
+    clearTimeout(dismissTimer);
+    $('result').classList.add('hidden');
+    state.busy = false;
+  }
+  $('result').addEventListener('click', dismiss);
+
+  function addRecent(r, v) {
+    state.recent.unshift({ name: r.name || r.regId || 'Unknown', id: r.regId || '', kind: v[0],
+      label: v[1].replace(/^[✓⚠✕]\s*/, ''), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) });
+    state.recent = state.recent.slice(0, 10);
+    $('recentList').innerHTML = state.recent.map(x =>
+      '<div class="row"><div class="who"><b>' + esc(x.name) + '</b><small>' + esc(x.id) + ' · ' + x.time +
+      '</small></div><span class="chip ' + x.kind + '">' + esc(x.label) + '</span></div>').join('');
+  }
+
+  // ---------- Search & manual admit ----------
+  let searchTimer = null, searchSeq = 0;
+  $('q').addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runSearch, 350);
+  });
+
+  async function runSearch() {
+    const q = $('q').value.trim();
+    const list = $('searchList');
+    if (q.length < 2) { list.innerHTML = ''; return; }
+    const seq = ++searchSeq;
+    list.innerHTML = '<div class="empty">Searching…</div>';
+    const r = await call('search', { q });
+    if (seq !== searchSeq) return;  // a newer search is running
+    if (!r.ok) { list.innerHTML = '<div class="empty">' + esc(r.message || r.error) + '</div>'; return; }
+    if (!r.results.length) { list.innerHTML = '<div class="empty">No matches</div>'; return; }
+    list.innerHTML = r.results.map(x => {
+      const chip = x.status === 'ADMITTED' ? '<span class="chip warn">In at ' + esc(x.admittedAt) + '</span>'
+        : x.status === 'REGISTERED' ? '<button class="admit" data-id="' + esc(x.regId) + '" data-name="' + esc(x.name) + '">Admit</button>'
+        : '<span class="chip bad">' + esc(x.status) + '</span>';
+      return '<div class="row"><div class="who"><b>' + esc(x.name) + '</b><small>' + esc(x.regId) + ' · ' +
+        esc(x.email) + '</small></div>' + chip + '</div>';
+    }).join('');
+  }
+
+  $('searchList').addEventListener('click', ev => {
+    const b = ev.target.closest('button.admit');
+    if (!b) return;
+    $('dlgTitle').textContent = 'Admit ' + b.dataset.name + '?';
+    $('dlgBody').textContent = 'Registration ' + b.dataset.id + '. Check that it matches their confirmation email.';
+    $('dlgYes').dataset.id = b.dataset.id;
+    $('confirmDlg').showModal();
+  });
+  $('dlgNo').addEventListener('click', () => $('confirmDlg').close());
+  $('dlgYes').addEventListener('click', async () => {
+    const id = $('dlgYes').dataset.id;
+    $('dlgYes').disabled = true;
+    const r = await call('admit', { regId: id });
+    $('dlgYes').disabled = false;
+    $('confirmDlg').close();
+    if (r.ok) {
+      const v = RESULT_VIEW[r.result] || ['bad', r.result, () => ''];
+      addRecent(r, v); showStats(r.stats); beep(v[0]);
+      alert(v[1].replace(/^[✓⚠✕]\s*/, '') + ': ' + (r.name || id) + (r.result === 'ALREADY' ? ' (at ' + r.admittedAt + ', ' + r.gate + ')' : ''));
+    } else {
+      alert(r.message || r.error);
+    }
+    runSearch();
+  });
+
+  // ---------- Feedback & helpers ----------
+  let audio = null;
+  function beep(kind) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const tones = { ok: [[880, 0, .12]], warn: [[520, 0, .12], [520, .18, .12]], bad: [[220, 0, .35]],
+        info: [], tick: [[1200, 0, .03]] }[kind] || [];
+      tones.forEach(([f, start, dur]) => {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.frequency.value = f; o.type = 'sine'; g.gain.value = .15;
+        o.connect(g); g.connect(audio.destination);
+        o.start(audio.currentTime + start); o.stop(audio.currentTime + start + dur);
+      });
+    } catch (e) {}
+  }
+
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator) {
+        await navigator.wakeLock.request('screen');
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') navigator.wakeLock.request('screen').catch(() => {});
+        });
+      }
+    } catch (e) {}
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if ($('app').classList.contains('hidden')) return;
+    if (document.visibilityState === 'hidden') stopCamera();
+    else if (!$('scanView').classList.contains('hidden')) startCamera();
+  });
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // ---------- Auto sign-in ----------
+  if (state.api && state.gate && state.pin) {
+    call('hello').then(r => { if (r.ok) enterApp(r); });
+  }
+})();
+</script>
+</body>
+</html>
